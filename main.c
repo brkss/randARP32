@@ -4,13 +4,13 @@
 #include <stdint.h>
 #include <string.h>
 #include "bjorklund.h"
-
+#include "utils.h"
 #define SAMPLE_RATE 44100
 #define BITS_PER_SAMPLE 16
 #define NUM_CHANNELS 1
 
 // BPM and timing controls
-#define BPM 180.0  // Faster tempo
+#define BPM 90.0  // Faster tempo
 #define BEATS_PER_NOTE 0.25  // 1/4 = quarter note, 0.25 = sixteenth note
 #define NOTE_DURATION ((60.0 / BPM) * BEATS_PER_NOTE)  // Duration of each note in seconds
 
@@ -24,7 +24,7 @@
 
 // Reverb parameters
 #define REVERB_BUFFER_SIZE 44100  // 1 second delay
-#define REVERB_FEEDBACK 0.3       // Less feedback
+#define REVERB_FEEDBACK 0.6       // Less feedback
 #define REVERB_MIX 0.2           // Less wet mix
 
 // Reverb buffer
@@ -190,16 +190,18 @@ int main() {
     int currentNote = 0;
     int patternStep = 0;
     double globalTime = 0.0;  // Keep track of global time for continuous waveform
+    int totalSteps = sequenceLength * steps;
+    double lastFreq = midiToFrequency(chord[0]);  // Keep track of last frequency for smooth transitions
 
-    
 
-    for (int n = 0; n < sequenceLength * steps; n++) {
+    for (int n = 0; n < totalSteps; n++) {
         // Only play note if current step in pattern is 1
         if (pattern[patternStep]) {
             int midiNote = chord[currentNote];
             double freq = midiToFrequency(midiNote);
-            printf("Step %d: Pattern[%d]=1, Note Index=%d, MIDI=%d, Freq=%.2f Hz\n", 
-                   n, patternStep, currentNote, midiNote, freq);
+            lastFreq = freq;  // Store current frequency
+            print_progress(n, totalSteps);
+            
             
             for (int i = 0; i < samplesPerNote; i++) {
                 double timeWithinNote = (double)i / SAMPLE_RATE;
@@ -210,21 +212,23 @@ int main() {
             }
             currentNote = (currentNote + 1) % chordSize;
         } else {
-            // Write silence for this step
+            // For silent steps, maintain the wave phase using the last frequency
             for (int i = 0; i < samplesPerNote; i++) {
-                short sample = 0;
+                double timeWithinNote = (double)i / SAMPLE_RATE;
+                // Generate a very quiet sample to maintain phase
+                short sample = generateSample(lastFreq, globalTime, timeWithinNote) / 1000;
+                sample = applyReverb(sample);
                 fwrite(&sample, sizeof(short), 1, f);
                 globalTime += 1.0 / SAMPLE_RATE;
             }
         }
 
-        // Update pattern step and note
+        // Update pattern step
         patternStep = (patternStep + 1) % steps;
-       
     }
 
     fclose(f);
-    printf("WAV file 'arpeggio.wav' generated successfully.\n");
+    printf("\nWAV file 'arpeggio.wav' generated successfully.\n");
 
     return 0;
 }
