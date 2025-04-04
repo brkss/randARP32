@@ -2,29 +2,30 @@
 #include <stdlib.h>
 #include <math.h>
 #include <stdint.h>
-
+#include <string.h>
+#include "bjorklund.h"
 
 #define SAMPLE_RATE 44100
 #define BITS_PER_SAMPLE 16
 #define NUM_CHANNELS 1
 
 // BPM and timing controls
-#define BPM 120.0  // Beats per minute
+#define BPM 180.0  // Faster tempo
 #define BEATS_PER_NOTE 0.25  // 1/4 = quarter note, 0.25 = sixteenth note
 #define NOTE_DURATION ((60.0 / BPM) * BEATS_PER_NOTE)  // Duration of each note in seconds
 
 #define PI 3.14159265358979323846
 
 // Envelope parameters (in seconds)
-#define ATTACK_TIME (NOTE_DURATION * 0.1)   // 10% of note duration
-#define DECAY_TIME (NOTE_DURATION * 0.2)    // 20% of note duration
-#define SUSTAIN_LEVEL 0.7
+#define ATTACK_TIME (NOTE_DURATION * 0.05)   // Faster attack
+#define DECAY_TIME (NOTE_DURATION * 0.3)    // Longer decay
+#define SUSTAIN_LEVEL 0.8                   // Higher sustain
 #define RELEASE_TIME (NOTE_DURATION * 0.2)  // 20% of note duration
 
 // Reverb parameters
 #define REVERB_BUFFER_SIZE 44100  // 1 second delay
-#define REVERB_FEEDBACK 0.5      // Feedback amount (0.0 to 1.0)
-#define REVERB_MIX 0.9         // Wet/dry mix (0.0 to 1.0)
+#define REVERB_FEEDBACK 0.3       // Less feedback
+#define REVERB_MIX 0.2           // Less wet mix
 
 // Reverb buffer
 static short reverbBuffer[REVERB_BUFFER_SIZE];
@@ -128,21 +129,47 @@ void writeWavHeader(FILE *f, int numSamples) {
 
 }
 
+
 int main() {
     // Initialize reverb
     initReverb();
     
-    // Define a simple chord 
-    int chord[] = {55, 59, 62, 67, 71, 74, 77, 79, 82, 87};
+    // Define a simple chord - C major arpeggio
+    int chord[] = {60, 64, 67, 72, 76, 79, 84, 88};  // C4, E4, G4, C5, E5, G5, C6, E6
     int chordSize = sizeof(chord) / sizeof(chord[0]);
+    printf("Chord size: %d\n", chordSize);
+    printf("Chord notes: ");
+    for(int i = 0; i < chordSize; i++) {
+        printf("%d ", chord[i]);
+    }
+    printf("\n");
 
-    int userSeed = 54654, sequenceLength = 100;
+    // Euclidean rhythm parameters
+    int steps = 16;  // Total steps in the pattern
+    int pulses = 7;  // Number of active beats
+    int pattern[16] = {0};  // Will hold our Euclidean pattern
+
+    printf("Chord notes: ");
+    for(int i = 0; i < chordSize; i++) {
+        printf("%d ", chord[i]);
+    }
+    printf("\n");
+    bjorklund_euclid(steps, pulses, pattern);
+
     
-    srand(userSeed); // Seed random number generator
+    printf("Euclidean Pattern (%d steps, %d pulses): ", steps, pulses);
+    for (int i = 0; i < steps; i++) {
+        printf("%d", pattern[i]);
+    }
+    printf("\n");
+
+    int sequenceLength = 100;
+    int userSeed = 54654;
+    srand(userSeed);
 
     // Calculate total samples based on BPM and sequence length
     int samplesPerNote = (int)(NOTE_DURATION * SAMPLE_RATE);
-    int totalSamples = samplesPerNote * sequenceLength;
+    int totalSamples = samplesPerNote * sequenceLength * steps;  // Multiply by steps for full pattern
 
     printf("BPM: %.1f\n", BPM);
     printf("Note Duration: %.3f seconds\n", NOTE_DURATION);
@@ -154,29 +181,48 @@ int main() {
         return 1;
     }
 
-    // Write the WAV header (we will fill in the header with correct sizes)
+    
+
+    // Write the WAV header
     writeWavHeader(f, totalSamples);
 
     // Generate and write samples for each note
     int currentNote = 0;
-    for (int n = 0; n < sequenceLength; n++) {
-        int midiNote = chord[currentNote];
-        if(currentNote == chordSize - 1) {
-            currentNote = 0;
+    int patternStep = 0;
+    double globalTime = 0.0;  // Keep track of global time for continuous waveform
+
+    
+
+    for (int n = 0; n < sequenceLength * steps; n++) {
+        // Only play note if current step in pattern is 1
+        if (pattern[patternStep]) {
+            int midiNote = chord[currentNote];
+            double freq = midiToFrequency(midiNote);
+            printf("Step %d: Pattern[%d]=1, Note Index=%d, MIDI=%d, Freq=%.2f Hz\n", 
+                   n, patternStep, currentNote, midiNote, freq);
+            
+            for (int i = 0; i < samplesPerNote; i++) {
+                double timeWithinNote = (double)i / SAMPLE_RATE;
+                short sample = generateSample(freq, globalTime, timeWithinNote);
+                sample = applyReverb(sample);
+                fwrite(&sample, sizeof(short), 1, f);
+                globalTime += 1.0 / SAMPLE_RATE;
+            }
+            currentNote = (currentNote + 1) % chordSize;
         } else {
-            currentNote++;
+            // Write silence for this step
+            for (int i = 0; i < samplesPerNote; i++) {
+                short sample = 0;
+                fwrite(&sample, sizeof(short), 1, f);
+                globalTime += 1.0 / SAMPLE_RATE;
+            }
         }
-        double freq = midiToFrequency(midiNote);
-        printf("Note %d: MIDI %d -> Frequency %.2f Hz\n", n+1, midiNote, freq);
-        for (int i = 0; i < samplesPerNote; i++) {
-            double t = (double)i / SAMPLE_RATE;
-            double timeWithinNote = (double)i / SAMPLE_RATE;
-            short sample = generateSample(freq, t, timeWithinNote);
-            // Apply reverb to the sample
-            sample = applyReverb(sample);
-            fwrite(&sample, sizeof(short), 1, f);
-        }
+
+        // Update pattern step and note
+        patternStep = (patternStep + 1) % steps;
+       
     }
+
     fclose(f);
     printf("WAV file 'arpeggio.wav' generated successfully.\n");
 
