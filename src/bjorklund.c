@@ -1,4 +1,4 @@
-#include "bjorklund.h"
+#include "../includes/bjorklund.h"
 
 static void build_pattern(int *pattern, int *counts, int *remainders, int level, int *index) {
     if (level == -1) {
